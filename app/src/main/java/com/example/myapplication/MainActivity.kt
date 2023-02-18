@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
@@ -21,9 +19,14 @@ import com.google.gson.Gson
 import com.journeyapps.barcodescanner.CaptureActivity
 import okhttp3.*
 import java.io.IOException
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 
 
-class MainActivity : AppCompatActivity() {
+
+class MainActivity : AppCompatActivity(){
 
     private val requestCodeForQRCode = 2
     private val requestCodeForPermission = 3
@@ -32,11 +35,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var latitudeText: TextView
     private lateinit var thingsboardURL: TextView
     private lateinit var httpResponse: TextView
+    private lateinit var azimuthText: TextView
     private lateinit var locationManager: LocationManager
+    private lateinit var sensorManager: SensorManager
 
     data class ThingsBoardData (
         var lat: Double = 0.0,
-        var long: Double = 0.0)
+        var long: Double = 0.0,
+        var azimuth: Double = 0.0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,8 +50,6 @@ class MainActivity : AppCompatActivity() {
         // render layouts
         setContentView(R.layout.activity_main)
 
-//        val btnGetGPS = findViewById<Button>(R.id.buttonGPS)
-//        val btnHttpPost = findViewById<Button>(R.id.buttonPost)
         val btnScan = findViewById<Button>(R.id.buttonScan)
 
         longitudeText = findViewById(R.id.longitude)
@@ -53,6 +57,8 @@ class MainActivity : AppCompatActivity() {
         deviceIDText = findViewById(R.id.deviceidvalue)
         thingsboardURL = findViewById(R.id.thingsboardURL)
         httpResponse = findViewById(R.id.httpResponse)
+        azimuthText = findViewById(R.id.azimuth)
+
 
         val pref = getSharedPreferences("data", MODE_PRIVATE)
         mapOf(
@@ -84,21 +90,6 @@ class MainActivity : AppCompatActivity() {
         locationManager =
             applicationContext.getSystemService(LOCATION_SERVICE) as LocationManager
 
-//        // set buttons
-//        btnGetGPS.setOnClickListener {
-//            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-//                // GPS provider is enabled, try getting the location
-//                Toast.makeText(this, "GPS enabled", Toast.LENGTH_SHORT).show()
-//                val location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-//                location?.let {
-//                    longitudeText.text = location.longitude.toString()
-//                    latitudeText.text = location.latitude.toString()
-//                }
-//            } else {
-//                // GPS provider is not enabled, prompt user to enable it
-//                Toast.makeText(this, "Please enable GPS", Toast.LENGTH_SHORT).show()
-//            }
-//        }
 
         btnScan.setOnClickListener {
             // scan qr code
@@ -116,12 +107,10 @@ class MainActivity : AppCompatActivity() {
             // get gps location
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 // GPS provider is enabled, try getting the location
-                // Toast.makeText(this, "GPS enabled", Toast.LENGTH_SHORT).show()
                 val location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
                 location?.let {
                     longitudeText.text = location.longitude.toString()
                     latitudeText.text = location.latitude.toString()
-                    // Toast.makeText(this,  location.longitude.toString(), Toast.LENGTH_SHORT).show()
                 }
             } else {
                 // GPS provider is not enabled, prompt user to enable it
@@ -131,42 +120,6 @@ class MainActivity : AppCompatActivity() {
             startActivityForResult(intent, requestCodeForQRCode)
         }
 
-//        btnHttpPost.setOnClickListener {
-//            val payload = Gson().toJson(ThingsBoardData(
-//                latitudeText.text.toString().toDoubleOrNull() ?: 0.0,
-//                longitudeText.text.toString().toDoubleOrNull() ?: 0.0
-//            ))
-//            httpResponse.text = "posting: $payload"
-//            val rawURL1 = "http://frontgate.tplinkdns.com:8080/api/v1/"
-//            val rawURL2 = "/attributes"
-//            val tokenID = deviceIDText.text.toString()
-//            val postURL = rawURL1 + tokenID +rawURL2
-//            // val postURL = thingsboardURL.text.toString()
-//            if (!URLUtil.isValidUrl(postURL)) {
-//                httpResponse.text = "invalid URL"
-//                return@setOnClickListener
-//            }
-//            val okHttpClient = OkHttpClient()
-//            val requestBody: RequestBody = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload)
-//            val request = Request.Builder()
-//                .method("POST", requestBody)
-//                .url(postURL)
-//                .addHeader("Content-Type", "application/json")
-//                .build()
-//            okHttpClient.newCall(request).enqueue(object : Callback {
-//                override fun onFailure(call: Call, e: IOException) {
-//                    runOnUiThread {
-//                        httpResponse.text = e.message
-//                    }
-//                }
-//
-//                override fun onResponse(call: Call, response: Response) {
-//                    runOnUiThread {
-//                        httpResponse.text = response.message() + ' ' + response.body()?.string()
-//                    }
-//                }
-//            })
-//        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -178,10 +131,38 @@ class MainActivity : AppCompatActivity() {
         }
 
 
+        // compass reading
+        // Initialize the sensor manager and the compass sensor
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        // Register the rotation vector sensor listener with a single function
+        sensorManager.registerListener(object : SensorEventListener {
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+                // We don't need to do anything here
+            }
+
+            override fun onSensorChanged(event: SensorEvent?) {
+                if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
+                    // Get the rotation vector data and convert it to a compass heading
+                    val rotationMatrix = FloatArray(9)
+                    SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                    val orientation = FloatArray(3)
+                    SensorManager.getOrientation(rotationMatrix, orientation)
+                    val azimuthDegrees = Math.toDegrees(orientation[0].toDouble())
+                    val azimuthOutput = if (azimuthDegrees < 0) azimuthDegrees + 360 else azimuthDegrees
+                    azimuthText.text = azimuthOutput.toString()
+
+                    // Unregister the sensor event listener to conserve resources
+                    sensorManager.unregisterListener(this)
+                }
+            }
+        }, sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR), SensorManager.SENSOR_DELAY_NORMAL)
+
+
         // http post
         val payload = Gson().toJson(ThingsBoardData(
             latitudeText.text.toString().toDoubleOrNull() ?: 0.0,
-            longitudeText.text.toString().toDoubleOrNull() ?: 0.0
+            longitudeText.text.toString().toDoubleOrNull() ?: 0.0,
+            azimuthText.text.toString().toDoubleOrNull() ?: 0.0,
         ))
         httpResponse.text = "posting: $payload"
         val rawURL1 = "http://frontgate.tplinkdns.com:8080/api/v1/"
